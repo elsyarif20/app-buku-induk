@@ -1,0 +1,14 @@
+{
+  "renders": [
+    {
+      "src": "app_web_induk.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "app_web_induk.py"
+    }
+  ]
+}
