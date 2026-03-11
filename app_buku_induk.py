@@ -1,351 +1,125 @@
-import sys
-import sqlite3
-import os
+import streamlit as st
 import pandas as pd
-from datetime import datetime
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QTableWidget, 
-                             QTableWidgetItem, QTabWidget, QFileDialog, QMessageBox, 
-                             QFrame, QLineEdit, QComboBox, QDateEdit, QFormLayout, 
-                             QHeaderView, QAbstractItemView)
-from PySide6.QtCore import Qt, QDate, QSize
-from PySide6.QtGui import QFont, QPixmap, QIcon
-
-# Import untuk PDF
-from reportlab.lib.pagesizes import A4
+import firebase_admin
+from firebase_admin import credentials, firestore
+import google.generativeai as genai
 from reportlab.pdfgen import canvas
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
+import io
 
-# --- DATABASE ENGINE ---
-class Database:
-    def __init__(self):
-        self.conn = sqlite3.connect("master_sekolah.db")
-        self.cursor = self.conn.cursor()
-        self.create_tables()
+# --- A. KONFIGURASI API & DATABASE ---
+# Masukkan API Key Gemini Anda di sini
+GENIMINI_API_KEY = "ISI_DENGAN_API_KEY_KAMU" 
+genai.configure(api_key=GENIMINI_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-    def create_tables(self):
-        # Tabel Siswa Lengkap
-        self.cursor.execute('''CREATE TABLE IF NOT EXISTS siswa (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nisn TEXT UNIQUE, 
-            nama TEXT, 
-            jk TEXT, 
-            tempat_lahir TEXT, 
-            tgl_lahir TEXT, 
-            agama TEXT, 
-            alamat TEXT, 
-            foto_path TEXT,
-            nama_ayah TEXT, 
-            pekerjaan_ayah TEXT, 
-            nama_ibu TEXT, 
-            kelas_sekarang TEXT, 
-            status_akademik TEXT)''')
-        self.conn.commit()
+# Inisialisasi Firebase (Gunakan Secrets di Streamlit Cloud untuk keamanan)
+if not firebase_admin._apps:
+    try:
+        # Untuk lokal, pakai file key.json. Untuk Cloud, gunakan st.secrets
+        if "firebase" in st.secrets:
+            cred_dict = dict(st.secrets["firebase"])
+            cred = credentials.Certificate(cred_dict)
+        else:
+            cred = credentials.Certificate('key.json')
+        firebase_admin.initialize_app(cred)
+    except Exception as e:
+        st.error(f"Koneksi Database Gagal: {e}")
 
-# --- MAIN APPLICATION WINDOW ---
-class BukuIndukUltimate(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.db = Database()
-        self.foto_sementara = ""
-        
-        self.setWindowTitle("SI-GHOZALI: Sistem Buku Induk & Rapor Digital V3.0")
-        self.resize(1280, 800)
-        self.setStyleSheet("background-color: #f5f6fa;")
+db = firestore.client() if firebase_admin._apps else None
 
-        self.init_ui()
+# --- B. UI SETUP ---
+st.set_page_config(page_title="SI-GHOZALI Web", layout="wide", page_icon="🏫")
 
-    def init_ui(self):
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
-        self.main_layout = QVBoxLayout(main_widget)
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stMetric { background-color: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    </style>
+    """, unsafe_allow_html=True)
 
-        # 1. HEADER PANEL
-        header = QFrame()
-        header.setFixedHeight(60)
-        header.setStyleSheet("background-color: #2f3640; border-radius: 0px;")
-        h_layout = QHBoxLayout(header)
-        
-        lbl_title = QLabel("🏫 SMK ISLAM AL-GHOZALI | DASHBOARD ADMINISTRASI")
-        lbl_title.setStyleSheet("color: white; font-weight: bold; font-size: 16px;")
-        h_layout.addWidget(lbl_title)
-        h_layout.addStretch()
-        
-        self.main_layout.addWidget(header)
+# --- C. SIDEBAR NAVIGATION ---
+st.sidebar.image("https://via.placeholder.com/150?text=AL-GHOZALI", width=100)
+st.sidebar.title("SI-GHOZALI V3.0")
+menu = st.sidebar.radio("Navigasi", ["📊 Dashboard", "📝 Input Siswa", "👥 Data Induk", "🤖 AI Rapor Assistant"])
 
-        # 2. TAB UTAMA
-        self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("QTabBar::tab { height: 40px; width: 200px; font-weight: bold; }")
-        
-        # Inisialisasi Tab
-        self.tab_dashboard = QWidget()
-        self.tab_data_siswa = QWidget()
-        
-        self.tabs.addTab(self.tab_dashboard, "📊 DASHBOARD")
-        self.tabs.addTab(self.tab_data_siswa, "👥 DATA INDUK SISWA")
-        
-        self.setup_dashboard_tab()
-        self.setup_siswa_tab()
-        
-        self.main_layout.addWidget(self.tabs)
+# --- D. FITUR: DASHBOARD ---
+if menu == "📊 Dashboard":
+    st.title("Pusat Data Pendidikan Al-Ghozali")
+    st.write(f"Selamat datang, **Bapak Liyas Syarifudin** (Head of Quality Development)")
+    
+    col1, col2, col3 = st.columns(3)
+    # Simulasi hitung data (Nanti bisa pakai len(df))
+    col1.metric("Total Siswa", "20", "+2")
+    col2.metric("Total Guru", "1", "0")
+    col3.metric("Tahun Ajaran", "2023/2024", "Aktif")
 
-    # --- TAB 1: DASHBOARD ---
-    def setup_dashboard_tab(self):
-        layout = QVBoxLayout(self.tab_dashboard)
-        
-        stats_layout = QHBoxLayout()
-        stats_layout.addWidget(self.create_card("TOTAL SISWA", "20", "#e17055"))
-        stats_layout.addWidget(self.create_card("ALUMNI", "0", "#0984e3"))
-        stats_layout.addWidget(self.create_card("GURU & STAF", "1", "#00b894"))
-        
-        layout.addLayout(stats_layout)
-        
-        info_box = QFrame()
-        info_box.setStyleSheet("background-color: white; border-radius: 10px; border: 1px solid #ddd;")
-        ib_layout = QVBoxLayout(info_box)
-        ib_layout.addWidget(QLabel("Selamat Datang di Sistem Informasi Sekolah"))
-        ib_layout.addWidget(QLabel("Gunakan Tab 'Data Induk Siswa' untuk mengelola data, cetak rapor, dan kartu ujian."))
-        
-        layout.addWidget(info_box)
-        layout.addStretch()
+    st.divider()
+    st.info("💡 Gunakan menu di samping untuk mengelola data siswa secara real-time.")
 
-    def create_card(self, title, value, color):
-        card = QFrame()
-        card.setMinimumHeight(150)
-        card.setStyleSheet(f"background-color: {color}; border-radius: 15px; color: white;")
-        l = QVBoxLayout(card)
-        t = QLabel(title); t.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        v = QLabel(value); v.setFont(QFont("Arial", 36, QFont.Weight.Bold))
-        v.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        l.addWidget(t); l.addWidget(v)
-        return card
+# --- E. FITUR: INPUT SISWA ---
+elif menu == "📝 Input Siswa":
+    st.subheader("Registrasi Siswa Baru")
+    with st.form("form_input", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            nisn = st.text_input("NISN")
+            nama = st.text_input("Nama Lengkap")
+            jk = st.selectbox("Jenis Kelamin", ["Laki-laki", "Perempuan"])
+        with c2:
+            kelas = st.selectbox("Unit / Kelas", ["X DKV 1", "X DKV 2", "XI DKV", "XII DKV"])
+            ayah = st.text_input("Nama Orang Tua/Wali")
+            alamat = st.text_area("Alamat")
+        
+        btn_save = st.form_submit_button("Simpan Data ke Cloud")
+        
+        if btn_save:
+            if db and nisn and nama:
+                db.collection('siswa').document(nisn).set({
+                    'nisn': nisn, 'nama': nama, 'jk': jk, 
+                    'kelas': kelas, 'ayah': ayah, 'alamat': alamat
+                })
+                st.success(f"Berhasil! Data {nama} sudah tersimpan di Firebase.")
+            else:
+                st.warning("Mohon lengkapi data dan pastikan Database aktif.")
 
-    # --- TAB 2: DATA SISWA ---
-    def setup_siswa_tab(self):
-        main_layout = QHBoxLayout(self.tab_data_siswa)
+# --- F. FITUR: DATA INDUK & EKSPOR ---
+elif menu == "👥 Data Induk":
+    st.subheader("Tabel Induk Siswa Terintegrasi")
+    if db:
+        docs = db.collection('siswa').stream()
+        list_data = [doc.to_dict() for doc in docs]
         
-        # Sisi Kiri: Form Input
-        form_container = QFrame()
-        form_container.setFixedWidth(400)
-        form_container.setStyleSheet("background-color: white; border-radius: 10px;")
-        left_layout = QVBoxLayout(form_container)
-        
-        lbl_form = QLabel("INPUT DATA SISWA BARU")
-        lbl_form.setStyleSheet("font-weight: bold; color: #2f3640;")
-        left_layout.addWidget(lbl_form)
+        if list_data:
+            df = pd.DataFrame(list_data)
+            st.dataframe(df, use_container_width=True)
+            
+            # Fitur Cetak Kartu Ujian Sederhana
+            pilih_siswa = st.selectbox("Pilih Siswa untuk Cetak Kartu", df['nama'].tolist())
+            if st.button("🖨️ Generate Kartu PDF"):
+                siswa = df[df['nama'] == pilih_siswa].iloc[0]
+                buf = io.BytesIO()
+                c = canvas.Canvas(buf, pagesize=(300, 200))
+                c.rect(10, 10, 280, 180)
+                c.drawCentredString(150, 170, "KARTU PESERTA UJIAN")
+                c.drawString(30, 130, f"Nama : {siswa['nama']}")
+                c.drawString(30, 110, f"NISN : {siswa['nisn']}")
+                c.drawString(30, 90, f"Kelas: {siswa['kelas']}")
+                c.save()
+                st.download_button("Download Kartu", buf.getvalue(), f"Kartu_{siswa['nisn']}.pdf")
+        else:
+            st.write("Belum ada data di cloud.")
 
-        # Form Scrollable jika field banyak
-        self.input_form = QFormLayout()
-        
-        self.in_nisn = QLineEdit()
-        self.in_nama = QLineEdit()
-        self.in_jk = QComboBox(); self.in_jk.addItems(["Laki-Laki", "Perempuan"])
-        self.in_tempat = QLineEdit()
-        self.in_tgl = QDateEdit(); self.in_tgl.setCalendarPopup(True); self.in_tgl.setDate(QDate.currentDate())
-        self.in_alamat = QLineEdit()
-        self.in_ayah = QLineEdit()
-        self.in_kelas = QComboBox(); self.in_kelas.addItems(["X DKV 1", "X DKV 2", "XI DKV", "XII DKV"])
-        
-        self.input_form.addRow("NISN:", self.in_nisn)
-        self.input_form.addRow("Nama Lengkap:", self.in_nama)
-        self.input_form.addRow("Jenis Kelamin:", self.in_jk)
-        self.input_form.addRow("Tempat Lahir:", self.in_tempat)
-        self.input_form.addRow("Tanggal Lahir:", self.in_tgl)
-        self.input_form.addRow("Alamat:", self.in_alamat)
-        self.input_form.addRow("Nama Ayah:", self.in_ayah)
-        self.input_form.addRow("Kelas:", self.in_kelas)
-
-        # Preview Foto
-        self.lbl_foto = QLabel("FOTO 3x4")
-        self.lbl_foto.setFixedSize(100, 130)
-        self.lbl_foto.setStyleSheet("border: 2px dashed #ccc; background: #f9f9f9;")
-        self.lbl_foto.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        btn_foto = QPushButton("Pilih Foto")
-        btn_foto.clicked.connect(self.pilih_foto)
-        
-        left_layout.addLayout(self.input_form)
-        left_layout.addWidget(self.lbl_foto, alignment=Qt.AlignmentFlag.AlignCenter)
-        left_layout.addWidget(btn_foto)
-        
-        btn_simpan = QPushButton("💾 SIMPAN DATA SISWA")
-        btn_simpan.setFixedHeight(40)
-        btn_simpan.setStyleSheet("background-color: #00b894; color: white; font-weight: bold;")
-        btn_simpan.clicked.connect(self.simpan_siswa)
-        left_layout.addWidget(btn_simpan)
-
-        # Sisi Kanan: Tabel Data
-        right_panel = QFrame()
-        right_layout = QVBoxLayout(right_panel)
-        
-        # Toolbar Atas Tabel
-        toolbar = QHBoxLayout()
-        self.in_cari = QLineEdit(); self.in_cari.setPlaceholderText("Cari Nama atau NISN...")
-        btn_cari = QPushButton("Cari"); btn_cari.clicked.connect(self.load_data_table)
-        
-        toolbar.addWidget(self.in_cari)
-        toolbar.addWidget(btn_cari)
-        right_layout.addLayout(toolbar)
-
-        # Tabel
-        self.table = QTableWidget()
-        self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels(["NISN", "NAMA", "JK", "KELAS", "AYAH", "STATUS"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        right_layout.addWidget(self.table)
-
-        # Panel Tombol Aksi Bawah
-        aksi_layout = QHBoxLayout()
-        btn_xls = QPushButton("📗 Export Excel"); btn_xls.clicked.connect(self.export_excel)
-        btn_p5 = QPushButton("📄 Cetak Rapor P5"); btn_p5.clicked.connect(self.cetak_rapor_pdf)
-        btn_kartu = QPushButton("🪪 Cetak Kartu Ujian"); btn_kartu.clicked.connect(self.cetak_kartu_pdf)
-        btn_naik = QPushButton("📈 Naik Kelas"); btn_naik.setStyleSheet("background-color: #fab1a0;"); btn_naik.clicked.connect(self.naik_kelas)
-        
-        aksi_layout.addWidget(btn_xls)
-        aksi_layout.addWidget(btn_p5)
-        aksi_layout.addWidget(btn_kartu)
-        aksi_layout.addWidget(btn_naik)
-        right_layout.addLayout(aksi_layout)
-
-        main_layout.addWidget(form_container)
-        main_layout.addWidget(right_panel)
-        
-        self.load_data_table()
-
-    # --- LOGIKA FITUR ---
-
-    def pilih_foto(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Pilih Foto", "", "Images (*.png *.jpg *.jpeg)")
-        if file_path:
-            self.foto_sementara = file_path
-            pix = QPixmap(file_path).scaled(100, 130, Qt.AspectRatioMode.KeepAspectRatio)
-            self.lbl_foto.setPixmap(pix)
-
-    def simpan_siswa(self):
-        data = (
-            self.in_nisn.text(), self.in_nama.text(), self.in_jk.currentText(),
-            self.in_tempat.text(), self.in_tgl.date().toString("dd-MM-yyyy"),
-            self.in_alamat.text(), self.foto_sementara, self.in_ayah.text(),
-            self.in_kelas.currentText(), "Aktif"
-        )
-        
-        if not data[0] or not data[1]:
-            QMessageBox.warning(self, "Input Error", "NISN dan Nama harus diisi!")
-            return
-
-        try:
-            self.db.cursor.execute('''INSERT OR REPLACE INTO siswa 
-                (nisn, nama, jk, tempat_lahir, tgl_lahir, alamat, foto_path, nama_ayah, kelas_sekarang, status_akademik)
-                VALUES (?,?,?,?,?,?,?,?,?,?)''', data)
-            self.db.conn.commit()
-            QMessageBox.information(self, "Sukses", "Data siswa berhasil disimpan!")
-            self.load_data_table()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
-
-    def load_data_table(self):
-        cari = self.in_cari.text()
-        query = "SELECT nisn, nama, jk, kelas_sekarang, nama_ayah, status_akademik FROM siswa"
-        if cari:
-            query += f" WHERE nama LIKE '%{cari}%' OR nisn LIKE '%{cari}%'"
-        
-        df = pd.read_sql_query(query, self.db.conn)
-        self.table.setRowCount(len(df))
-        for i, row in df.iterrows():
-            for j, val in enumerate(row):
-                self.table.setItem(i, j, QTableWidgetItem(str(val)))
-
-    def export_excel(self):
-        df = pd.read_sql_query("SELECT * FROM siswa", self.db.conn)
-        path, _ = QFileDialog.getSaveFileName(self, "Simpan Excel", "", "Excel Files (*.xlsx)")
-        if path:
-            df.to_excel(path, index=False)
-            QMessageBox.information(self, "Sukses", "Data berhasil diekspor!")
-
-    def cetak_rapor_pdf(self):
-        row = self.table.currentRow()
-        if row < 0: return
-        
-        nisn = self.table.item(row, 0).text()
-        nama = self.table.item(row, 1).text()
-        kelas = self.table.item(row, 3).text()
-
-        doc = SimpleDocTemplate(f"Rapor_P5_{nama}.pdf", pagesize=A4)
-        elements = []
-        styles = getSampleStyleSheet()
-
-        elements.append(Paragraph(f"<b>RAPOR PROJEK PENGUATAN PROFIL PELAJAR PANCASILA</b>", styles['Title']))
-        elements.append(Spacer(1, 20))
-        elements.append(Paragraph(f"Nama Siswa: {nama} | NISN: {nisn} | Kelas: {kelas}", styles['Normal']))
-        elements.append(Spacer(1, 10))
-
-        data = [
-            ['Komponen Proyek', 'Capaian', 'Catatan'],
-            ['1. Kebersihan Lingkungan', 'Sangat Berkembang', 'Aktif dalam gotong royong'],
-            ['2. Suara Demokrasi', 'Berkembang', 'Berani mengutarakan pendapat'],
-            ['3. Kewirausahaan', 'Berkembang', 'Kreatif dalam membuat produk']
-        ]
-        
-        t = Table(data, colWidths=[200, 100, 150])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.darkblue),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-            ('GRID', (0,0), (-1,-1), 1, colors.black),
-            ('PADDING', (0,0), (-1,-1), 10)
-        ]))
-        elements.append(t)
-        doc.build(elements)
-        QMessageBox.information(self, "Sukses", f"Rapor PDF {nama} berhasil dicetak!")
-
-    def cetak_kartu_pdf(self):
-        row = self.table.currentRow()
-        if row < 0: return
-        
-        nisn = self.table.item(row, 0).text()
-        nama = self.table.item(row, 1).text()
-        kelas = self.table.item(row, 3).text()
-
-        c = canvas.Canvas(f"Kartu_Ujian_{nisn}.pdf", pagesize=(300, 200))
-        c.rect(5, 5, 290, 190)
-        c.setFont("Helvetica-Bold", 10)
-        c.drawCentredString(150, 175, "KARTU PESERTA UJIAN SMK AL-GHOZALI")
-        c.line(10, 165, 290, 165)
-        
-        c.setFont("Helvetica", 9)
-        c.drawString(20, 140, f"Nama  : {nama}")
-        c.drawString(20, 125, f"NISN  : {nisn}")
-        c.drawString(20, 110, f"Kelas : {kelas}")
-        
-        c.rect(220, 100, 50, 60) # Frame Foto
-        c.setFont("Helvetica", 6)
-        c.drawCentredString(245, 125, "FOTO 2x3")
-        
-        c.save()
-        QMessageBox.information(self, "Sukses", "Kartu ujian telah dibuat.")
-
-    def naik_kelas(self):
-        row = self.table.currentRow()
-        if row < 0: return
-        
-        nisn = self.table.item(row, 0).text()
-        nama = self.table.item(row, 1).text()
-        
-        reply = QMessageBox.question(self, "Konfirmasi", f"Naikkan kelas ananda {nama}?", 
-                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            self.db.cursor.execute("UPDATE siswa SET kelas_sekarang = 'XI DKV' WHERE nisn = ?", (nisn,))
-            self.db.conn.commit()
-            self.load_data_table()
-            QMessageBox.information(self, "Sukses", "Status kelas berhasil diupdate!")
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    # Set Tema Fusion agar terlihat modern di Windows
-    app.setStyle("Fusion")
-    window = BukuIndukUltimate()
-    window.show()
-    sys.exit(app.exec())
+# --- G. FITUR: AI RAPOR ASSISTANT ---
+elif menu == "🤖 AI Rapor Assistant":
+    st.subheader("Asisten Penulisan Deskripsi Rapor (Gemini AI)")
+    nama_s = st.text_input("Nama Siswa")
+    proyek = st.text_input("Nama Proyek P5", "Kebersihan Lingkungan")
+    capaian = st.select_slider("Tingkat Capaian", ["Mulai Berkembang", "Sedang Berkembang", "Berkembang Sesuai Harapan", "Sangat Berkembang"])
+    
+    if st.button("Generate Narasi Rapor"):
+        with st.spinner("AI sedang berpikir..."):
+            prompt = f"Buat deskripsi rapor P5 untuk siswa bernama {nama_s}. Proyek: {proyek}. Capaian: {capaian}. Gunakan bahasa yang edukatif dan memotivasi untuk Kurikulum Merdeka."
+            response = model.generate_content(prompt)
+            st.write("### Rekomendasi Narasi:")
+            st.info(response.text)
